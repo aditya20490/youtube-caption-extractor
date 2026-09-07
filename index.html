@@ -118,6 +118,11 @@
     .loader.show {
       display: block;
     }
+    .warning {
+      color: #ffd21f;
+      font-size: 13px;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
@@ -138,6 +143,7 @@
     </div>
 
     <div id="errorMessage" class="error"></div>
+    <div id="warningMessage" class="warning"></div>
   </div>
 
   <script>
@@ -145,15 +151,17 @@
 
     document.getElementById("extractBtn").addEventListener("click", extractCaption);
 
-    function extractCaption() {
+    async function extractCaption() {
       const urlInput = document.getElementById("youtubeUrl");
       const url = urlInput.value.trim();
       const errorDiv = document.getElementById("errorMessage");
+      const warningDiv = document.getElementById("warningMessage");
       const resultDiv = document.getElementById("result");
       const loader = document.getElementById("loader");
       const captionBox = document.getElementById("captionBox");
 
       errorDiv.textContent = "";
+      warningDiv.textContent = "";
       resultDiv.style.display = "none";
       loader.classList.add("show");
       document.getElementById("extractBtn").disabled = true;
@@ -173,23 +181,24 @@
         return;
       }
 
-      fetchVideoDetails(videoId)
-        .then(details => {
-          document.getElementById("videoTitle").textContent = details.title;
-          document.getElementById("videoMeta").textContent = details.channel + " • " + details.views + " views";
-          return fetchCaption(videoId);
-        })
-        .then(caption => {
-          captionBox.textContent = caption || "No captions found for this video.";
+      try {
+        const details = await fetchVideoDetails(videoId);
+        document.getElementById("videoTitle").textContent = details.title;
+        document.getElementById("videoMeta").textContent = details.channel + " • " + details.views + " views";
+
+        const caption = await fetchCaption(videoId);
+        if (caption) {
+          captionBox.textContent = caption;
           resultDiv.style.display = "block";
-          loader.classList.remove("show");
-          document.getElementById("extractBtn").disabled = false;
-        })
-        .catch(err => {
-          errorDiv.textContent = err.message || "Something went wrong. Please try again.";
-          loader.classList.remove("show");
-          document.getElementById("extractBtn").disabled = false;
-        });
+        } else {
+          warningDiv.textContent = "⚠️ No captions found. This video may not have captions available.";
+        }
+      } catch (err) {
+        errorDiv.textContent = err.message || "Something went wrong. Please try again.";
+      }
+
+      loader.classList.remove("show");
+      document.getElementById("extractBtn").disabled = false;
     }
 
     function extractVideoId(url) {
@@ -222,35 +231,51 @@
     }
 
     async function fetchCaption(videoId) {
-      // Try primary proxy
-      try {
-        const proxyUrl = `https://yt-api.com/api/subtitles?videoId=${videoId}`;
-        const response = await fetch(proxyUrl);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.subtitles && data.subtitles.length > 0) {
-            return data.subtitles.map(item => item.text).join(' ');
+      // Try multiple proxy services
+      const proxies = [
+        {
+          url: `https://yt-api.com/api/subtitles?videoId=${videoId}`,
+          extractor: (data) => {
+            if (data.subtitles && data.subtitles.length > 0) {
+              return data.subtitles.map(item => item.text).join(' ');
+            }
+            return null;
+          }
+        },
+        {
+          url: `https://youtube-transcript.vercel.app/api/transcript?videoId=${videoId}`,
+          extractor: (data) => {
+            if (data.transcript && data.transcript.length > 0) {
+              return data.transcript.map(item => item.text).join(' ');
+            }
+            return null;
+          }
+        },
+        {
+          url: `https://youtube-mp3-downloader2.vercel.app/api/transcript?videoId=${videoId}`,
+          extractor: (data) => {
+            if (data.transcript && data.transcript.length > 0) {
+              return data.transcript.map(item => item.text).join(' ');
+            }
+            return null;
           }
         }
-      } catch (e) {
-        // Primary failed, try backup
-      }
+      ];
 
-      // Try backup proxy
-      try {
-        const backupUrl = `https://youtube-transcript.vercel.app/api/transcript?videoId=${videoId}`;
-        const backupResponse = await fetch(backupUrl);
-        if (backupResponse.ok) {
-          const backupData = await backupResponse.json();
-          if (backupData.transcript && backupData.transcript.length > 0) {
-            return backupData.transcript.map(item => item.text).join(' ');
+      for (const proxy of proxies) {
+        try {
+          const response = await fetch(proxy.url);
+          if (response.ok) {
+            const data = await response.json();
+            const result = proxy.extractor(data);
+            if (result) return result;
           }
+        } catch (e) {
+          // Try next proxy
         }
-      } catch (e) {
-        // Backup failed
       }
 
-      throw new Error("Could not fetch captions. The video may not have captions or the service is down.");
+      return null;
     }
 
     document.getElementById("downloadBtn").addEventListener("click", function() {
