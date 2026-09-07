@@ -173,7 +173,6 @@
         return;
       }
 
-      // First, get video details
       fetchVideoDetails(videoId)
         .then(details => {
           document.getElementById("videoTitle").textContent = details.title;
@@ -223,65 +222,37 @@
     }
 
     async function fetchCaption(videoId) {
-      // First, get list of available captions
-      const listUrl = `https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=${videoId}&key=${API_KEY}`;
-      const response = await fetch(listUrl);
-      if (!response.ok) throw new Error("Failed to fetch captions list");
-
-      const data = await response.json();
-      if (!data.items || data.items.length === 0) {
-        return null;
-      }
-
-      // Find English captions first, or any if English not available
-      let captionId = null;
-      let lang = "en";
-      for (const item of data.items) {
-        if (item.snippet.language === "en") {
-          captionId = item.id;
-          lang = "en";
-          break;
+      // Try primary proxy
+      try {
+        const proxyUrl = `https://yt-api.com/api/subtitles?videoId=${videoId}`;
+        const response = await fetch(proxyUrl);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.subtitles && data.subtitles.length > 0) {
+            return data.subtitles.map(item => item.text).join(' ');
+          }
         }
-      }
-      if (!captionId) {
-        captionId = data.items[0].id;
-        lang = data.items[0].snippet.language;
+      } catch (e) {
+        // Primary failed, try backup
       }
 
-      // Now fetch the actual caption content
-      const trackUrl = `https://www.googleapis.com/youtube/v3/captions/${captionId}?key=${API_KEY}&tfmt=srt`;
-      const trackResponse = await fetch(trackUrl);
-      if (!trackResponse.ok) throw new Error("Failed to fetch caption content");
+      // Try backup proxy
+      try {
+        const backupUrl = `https://youtube-transcript.vercel.app/api/transcript?videoId=${videoId}`;
+        const backupResponse = await fetch(backupUrl);
+        if (backupResponse.ok) {
+          const backupData = await backupResponse.json();
+          if (backupData.transcript && backupData.transcript.length > 0) {
+            return backupData.transcript.map(item => item.text).join(' ');
+          }
+        }
+      } catch (e) {
+        // Backup failed
+      }
 
-      const srtContent = await trackResponse.text();
-      return parseSrtToText(srtContent);
+      throw new Error("Could not fetch captions. The video may not have captions or the service is down.");
     }
 
-    function parseSrtToText(srt) {
-      // Remove timestamps and sequence numbers, keep only text
-      const lines = srt.split('\n');
-      const textLines = [];
-      let i = 0;
-      while (i < lines.length) {
-        const line = lines[i].trim();
-        // Skip empty lines and sequence numbers
-        if (line === '' || /^\d+$/.test(line)) {
-          i++;
-          continue;
-        }
-        // Skip timestamp lines (contains -->)
-        if (line.includes('-->')) {
-          i++;
-          continue;
-        }
-        // This is a text line
-        textLines.push(line);
-        i++;
-      }
-      return textLines.join(' ');
-    }
-
-    // Download as TXT
     document.getElementById("downloadBtn").addEventListener("click", function() {
       const title = document.getElementById("videoTitle").textContent;
       const caption = document.getElementById("captionBox").textContent;
