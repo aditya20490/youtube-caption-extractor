@@ -141,8 +141,158 @@
   </div>
 
   <script>
-    // JavaScript will go here in Task 5
-    console.log("YouTube Caption Extractor is ready!");
+    const API_KEY = "AIzaSyAJhYU4aZ7GnFsv-Wd0_2UX9oCzoFRCbOE";
+
+    document.getElementById("extractBtn").addEventListener("click", extractCaption);
+
+    function extractCaption() {
+      const urlInput = document.getElementById("youtubeUrl");
+      const url = urlInput.value.trim();
+      const errorDiv = document.getElementById("errorMessage");
+      const resultDiv = document.getElementById("result");
+      const loader = document.getElementById("loader");
+      const captionBox = document.getElementById("captionBox");
+
+      errorDiv.textContent = "";
+      resultDiv.style.display = "none";
+      loader.classList.add("show");
+      document.getElementById("extractBtn").disabled = true;
+
+      if (!url) {
+        errorDiv.textContent = "Please paste a YouTube URL.";
+        loader.classList.remove("show");
+        document.getElementById("extractBtn").disabled = false;
+        return;
+      }
+
+      const videoId = extractVideoId(url);
+      if (!videoId) {
+        errorDiv.textContent = "Invalid YouTube URL. Please check and try again.";
+        loader.classList.remove("show");
+        document.getElementById("extractBtn").disabled = false;
+        return;
+      }
+
+      // First, get video details
+      fetchVideoDetails(videoId)
+        .then(details => {
+          document.getElementById("videoTitle").textContent = details.title;
+          document.getElementById("videoMeta").textContent = details.channel + " • " + details.views + " views";
+          return fetchCaption(videoId);
+        })
+        .then(caption => {
+          captionBox.textContent = caption || "No captions found for this video.";
+          resultDiv.style.display = "block";
+          loader.classList.remove("show");
+          document.getElementById("extractBtn").disabled = false;
+        })
+        .catch(err => {
+          errorDiv.textContent = err.message || "Something went wrong. Please try again.";
+          loader.classList.remove("show");
+          document.getElementById("extractBtn").disabled = false;
+        });
+    }
+
+    function extractVideoId(url) {
+      const patterns = [
+        /(?:youtube\.com\/watch\?v=)([\w-]+)/,
+        /(?:youtu\.be\/)([\w-]+)/,
+        /(?:youtube\.com\/embed\/)([\w-]+)/
+      ];
+      for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+      }
+      return null;
+    }
+
+    async function fetchVideoDetails(videoId) {
+      const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${videoId}&key=${API_KEY}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Failed to fetch video details");
+      const data = await response.json();
+      if (!data.items || data.items.length === 0) {
+        throw new Error("Video not found");
+      }
+      const item = data.items[0];
+      return {
+        title: item.snippet.title,
+        channel: item.snippet.channelTitle,
+        views: parseInt(item.statistics.viewCount).toLocaleString()
+      };
+    }
+
+    async function fetchCaption(videoId) {
+      // First, get list of available captions
+      const listUrl = `https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=${videoId}&key=${API_KEY}`;
+      const response = await fetch(listUrl);
+      if (!response.ok) throw new Error("Failed to fetch captions list");
+
+      const data = await response.json();
+      if (!data.items || data.items.length === 0) {
+        return null;
+      }
+
+      // Find English captions first, or any if English not available
+      let captionId = null;
+      let lang = "en";
+      for (const item of data.items) {
+        if (item.snippet.language === "en") {
+          captionId = item.id;
+          lang = "en";
+          break;
+        }
+      }
+      if (!captionId) {
+        captionId = data.items[0].id;
+        lang = data.items[0].snippet.language;
+      }
+
+      // Now fetch the actual caption content
+      const trackUrl = `https://www.googleapis.com/youtube/v3/captions/${captionId}?key=${API_KEY}&tfmt=srt`;
+      const trackResponse = await fetch(trackUrl);
+      if (!trackResponse.ok) throw new Error("Failed to fetch caption content");
+
+      const srtContent = await trackResponse.text();
+      return parseSrtToText(srtContent);
+    }
+
+    function parseSrtToText(srt) {
+      // Remove timestamps and sequence numbers, keep only text
+      const lines = srt.split('\n');
+      const textLines = [];
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i].trim();
+        // Skip empty lines and sequence numbers
+        if (line === '' || /^\d+$/.test(line)) {
+          i++;
+          continue;
+        }
+        // Skip timestamp lines (contains -->)
+        if (line.includes('-->')) {
+          i++;
+          continue;
+        }
+        // This is a text line
+        textLines.push(line);
+        i++;
+      }
+      return textLines.join(' ');
+    }
+
+    // Download as TXT
+    document.getElementById("downloadBtn").addEventListener("click", function() {
+      const title = document.getElementById("videoTitle").textContent;
+      const caption = document.getElementById("captionBox").textContent;
+      const blob = new Blob([caption], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title}-caption.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
   </script>
 </body>
 </html>
