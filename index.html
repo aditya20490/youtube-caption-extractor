@@ -49,7 +49,7 @@
   <script>
     document.getElementById("extractBtn").addEventListener("click", extractCaption);
 
-    function extractCaption() {
+    async function extractCaption() {
       const urlInput = document.getElementById("youtubeUrl");
       const url = urlInput.value.trim();
       const errorDiv = document.getElementById("errorMessage");
@@ -77,21 +77,40 @@
         return;
       }
 
-      // Use a working API to fetch video info and transcript
-      fetchVideoData(videoId)
-        .then(data => {
-          document.getElementById("videoTitle").textContent = data.title;
-          document.getElementById("videoMeta").textContent = data.channel + " • " + data.views;
-          captionBox.textContent = data.caption || "No caption found for this video.";
-          resultDiv.style.display = "block";
-          loader.classList.remove("show");
-          document.getElementById("extractBtn").disabled = false;
-        })
-        .catch(err => {
-          errorDiv.textContent = err.message || "Something went wrong. Try another video.";
-          loader.classList.remove("show");
-          document.getElementById("extractBtn").disabled = false;
-        });
+      try {
+        // Use the working API
+        const response = await fetch(`https://yt-api.com/api/transcript?videoId=${videoId}`);
+        
+        if (!response.ok) {
+          throw new Error("Video may not have captions");
+        }
+
+        const data = await response.json();
+        
+        // Get video details from oEmbed
+        const oembedResponse = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+        const oembedData = await oembedResponse.json();
+
+        document.getElementById("videoTitle").textContent = oembedData.title || "Video Title";
+        document.getElementById("videoMeta").textContent = oembedData.author_name || "YouTube";
+
+        // Extract caption text
+        if (data && data.transcript && data.transcript.length > 0) {
+          const text = data.transcript.map(item => item.text).join(' ');
+          captionBox.textContent = text;
+        } else {
+          captionBox.textContent = "No captions found for this video.";
+        }
+
+        resultDiv.style.display = "block";
+        loader.classList.remove("show");
+        document.getElementById("extractBtn").disabled = false;
+
+      } catch (error) {
+        errorDiv.textContent = error.message || "Could not fetch captions. Try another video.";
+        loader.classList.remove("show");
+        document.getElementById("extractBtn").disabled = false;
+      }
     }
 
     function extractVideoId(url) {
@@ -105,64 +124,6 @@
         if (match) return match[1];
       }
       return null;
-    }
-
-    async function fetchVideoData(videoId) {
-      // First, get video details from oEmbed
-      const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
-      const oembedResponse = await fetch(oembedUrl);
-      if (!oembedResponse.ok) throw new Error("Failed to fetch video details");
-      const oembedData = await oembedResponse.json();
-
-      // Try to get caption using a reliable proxy
-      try {
-        const proxyUrl = `https://api.agilestudio.co/api/youtube/transcript/${videoId}`;
-        const proxyResponse = await fetch(proxyUrl);
-        if (proxyResponse.ok) {
-          const proxyData = await proxyResponse.json();
-          if (proxyData.transcript && proxyData.transcript.length > 0) {
-            const text = proxyData.transcript.map(item => item.text).join(' ');
-            return {
-              title: oembedData.title || "Unknown Title",
-              channel: oembedData.author_name || "Unknown Channel",
-              views: oembedData.author_url ? "YouTube" : "Unknown",
-              caption: text
-            };
-          }
-        }
-      } catch (e) {
-        // Proxy failed, try alternative
-      }
-
-      // Fallback: Use a different proxy
-      try {
-        const backupUrl = `https://youtubetranscript.com/?v=${videoId}`;
-        const backupResponse = await fetch(backupUrl);
-        if (backupResponse.ok) {
-          const html = await backupResponse.text();
-          // Extract text from the page (simple extraction)
-          const textMatch = html.match(/<pre>(.*?)<\/pre>/s);
-          if (textMatch) {
-            const text = textMatch[1].replace(/<[^>]*>/g, '').trim();
-            return {
-              title: oembedData.title || "Unknown Title",
-              channel: oembedData.author_name || "Unknown Channel",
-              views: oembedData.author_url || "YouTube",
-              caption: text
-            };
-          }
-        }
-      } catch (e) {
-        // Backup failed
-      }
-
-      // If all fails, return what we have
-      return {
-        title: oembedData.title || "Unknown Title",
-        channel: oembedData.author_name || "Unknown Channel",
-        views: "YouTube",
-        caption: "No caption found for this video. Try a different video with captions."
-      };
     }
 
     document.getElementById("downloadBtn").addEventListener("click", function() {
