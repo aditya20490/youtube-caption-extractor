@@ -47,6 +47,9 @@
   </div>
 
   <script>
+    // Your Cloudflare Worker URL
+    const WORKER_URL = "https://youtub-caption-worker.828477ss.workers.dev";
+
     document.getElementById("extractBtn").addEventListener("click", extractCaption);
 
     async function extractCaption() {
@@ -78,26 +81,28 @@
       }
 
       try {
-        // Use the working API
-        const response = await fetch(`https://yt-api.com/api/transcript?videoId=${videoId}`);
+        // Get video info from oEmbed
+        const infoResponse = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+        const infoData = await infoResponse.json();
         
-        if (!response.ok) {
-          throw new Error("Video may not have captions");
+        document.getElementById("videoTitle").textContent = infoData.title || "Video Title";
+        document.getElementById("videoMeta").textContent = infoData.author_name || "YouTube Channel";
+
+        // Get transcript from your Worker
+        const transcriptResponse = await fetch(`${WORKER_URL}/transcript?videoId=${videoId}`);
+        
+        if (!transcriptResponse.ok) {
+          throw new Error("Worker returned error: " + transcriptResponse.status);
         }
 
-        const data = await response.json();
+        const transcriptData = await transcriptResponse.json();
         
-        // Get video details from oEmbed
-        const oembedResponse = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
-        const oembedData = await oembedResponse.json();
+        if (transcriptData.error) {
+          throw new Error(transcriptData.error);
+        }
 
-        document.getElementById("videoTitle").textContent = oembedData.title || "Video Title";
-        document.getElementById("videoMeta").textContent = oembedData.author_name || "YouTube";
-
-        // Extract caption text
-        if (data && data.transcript && data.transcript.length > 0) {
-          const text = data.transcript.map(item => item.text).join(' ');
-          captionBox.textContent = text;
+        if (transcriptData.transcript && transcriptData.transcript.length > 0) {
+          captionBox.textContent = transcriptData.transcript;
         } else {
           captionBox.textContent = "No captions found for this video.";
         }
